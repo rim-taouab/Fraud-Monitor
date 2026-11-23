@@ -50,12 +50,19 @@ class XGBDetector:
             n_jobs=-1,
         )
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         y = np.asarray(y)
-        pos = max(int(y.sum()), 1)
-        neg = len(y) - pos
-        self.model = XGBClassifier(scale_pos_weight=neg / pos, **self._params)
-        self.model.fit(X, y)
+        if sample_weight is None:
+            # Balance the rare class by the class-ratio.
+            pos = max(int(y.sum()), 1)
+            neg = len(y) - pos
+            self.model = XGBClassifier(scale_pos_weight=neg / pos, **self._params)
+            self.model.fit(X, y)
+        else:
+            # Cost-sensitive: per-row weights already encode the imbalance and
+            # the cost of each error, so don't double-count with scale_pos_weight.
+            self.model = XGBClassifier(scale_pos_weight=1.0, **self._params)
+            self.model.fit(X, y, sample_weight=np.asarray(sample_weight))
         return self
 
     def score(self, X):

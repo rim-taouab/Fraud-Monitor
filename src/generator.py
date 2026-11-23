@@ -64,17 +64,23 @@ class UserProfile:
 
 @dataclass
 class GenConfig:
-    n_users: int = 2000
-    n_days: int = 60
+    n_users: int = 3000
+    n_days: int = 90
     n_merchants: int = 500
-    fraud_user_fraction: float = 0.03  # share of users that get attacked
+    # Share of users attacked. Set so the fraud rate stays realistic (~0.3%,
+    # near Kaggle's 0.17%) while giving ENOUGH of each pattern -- especially the
+    # rare high-value ones -- for a stable, learnable signal and a cost estimate
+    # that isn't driven by 2-3 lucky frauds.
+    fraud_user_fraction: float = 0.09
     seed: int = 7
     start: str = "2026-01-01"
-    # how many fraud episodes of each pattern, as a fraction of attacked users
+    # how many fraud episodes of each pattern, as a fraction of attacked users.
+    # amount_spike / impossible_travel are weighted up: they are the high-value,
+    # low-count patterns that dominate cost, so they need volume.
     pattern_mix: dict = field(default_factory=lambda: {
-        FraudPattern.VELOCITY_BURST: 0.30,
+        FraudPattern.VELOCITY_BURST: 0.25,
         FraudPattern.IMPOSSIBLE_TRAVEL: 0.25,
-        FraudPattern.AMOUNT_SPIKE: 0.25,
+        FraudPattern.AMOUNT_SPIKE: 0.30,
         FraudPattern.CARD_TESTING: 0.20,
     })
 
@@ -197,10 +203,18 @@ def _inject_amount_spike(u, cfg, rng):
     dev = _fraud_device(rng)
     cat = MerchantCategory.ELECTRONICS
     base = _CATEGORY_TICKET[cat] * u.spend_scale
-    amt = float(base * rng.uniform(8, 20))  # far above the user's norm
-    return [(t0, u.user_id, card, int(rng.integers(0, cfg.n_merchants)),
-             int(cat), round(amt, 2), u.home_lat, u.home_lon, dev, 1,
-             FraudPattern.AMOUNT_SPIKE)]
+    # 2-3 large charges spaced hours apart (not a velocity burst): the signal is
+    # the AMOUNT vs the user's norm, not the timing. Multi-charge so the pattern
+    # is learnable and shows up in enough test rows to measure its cost.
+    n = int(rng.integers(2, 4))
+    rows = []
+    for _ in range(n):
+        t0 += pd.Timedelta(hours=int(rng.integers(1, 9)))
+        amt = float(base * rng.uniform(8, 20))  # far above the user's norm
+        rows.append((t0, u.user_id, card, int(rng.integers(0, cfg.n_merchants)),
+                     int(cat), round(amt, 2), u.home_lat, u.home_lon, dev, 1,
+                     FraudPattern.AMOUNT_SPIKE))
+    return rows
 
 
 def _inject_card_testing(u, cfg, rng):

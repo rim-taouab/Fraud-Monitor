@@ -1,0 +1,18 @@
+# Environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Data (regenerable from the synthetic generator; Kaggle csv is external)
+data/
+*.csv
+!data/.gitkeep
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

@@ -18,12 +18,14 @@ adaptatif.
 | 1 | Données + baseline de règles | ✅ terminé |
 | 2 | Détecteur ML (LogReg, XGBoost, Isolation Forest) | ✅ terminé |
 | 3 | Couche quant (seuil minimisant le coût, IC bootstrap, SHAP) | ✅ terminé |
-| 4 | Course à l'armement adverse (attaquant vs. ré-entraînement) | ⬜ à suivre |
-| 5 | Mise en production (flux, dashboard, write-up) | ⬜ |
+| 4 | Course à l'armement adverse (attaquant vs. ré-entraînement) | ✅ terminé |
+| 5 | Mise en production (flux, dashboard, write-up) | ⬜ à suivre |
 
-**Résultat phare (Phase 3) :** le seuil minimisant le coût **économise ~979 par
-1 000 transactions** vs les règles sur le jeu de test tenu à l'écart, IC 95 %
-bootstrap **[686, 1289]**.
+**Résultats phares :**
+- **(Phase 3)** le seuil minimisant le coût **économise ~979 par 1 000
+  transactions** vs les règles, IC 95 % bootstrap **[686, 1289]**.
+- **(Phase 4)** face à un attaquant évolutionnaire qui s'adapte, le
+  **ré-entraînement réduit de 72 % le butin** du fraudeur vs un modèle gelé.
 
 ## Résultat Phase 1 — la baseline que tout modèle devra battre
 
@@ -118,6 +120,39 @@ Autres livrables de la phase :
 - **Seuil global vs par tranche de montant** : un seuil par tranche n'améliore le
   coût que de ~1 % — **marginal, pas la peine** d'ajouter la complexité.
 
+## Résultat Phase 4 — la course à l'armement (ce qui distingue le projet)
+
+Un **fraudeur évolutionnaire** sonde le détecteur (il n'a accès qu'au score, en
+boîte noire) et fait évoluer sa stratégie — montant, nombre de charges, écart
+temporel, distance au domicile, catégorie marchand — pour maximiser la **valeur
+non détectée**. Chaque transaction d'attaque passe par les **mêmes features
+causales** que le détecteur (comptes glissants reconstruits analytiquement), donc
+l'attaque est scorée comme en production.
+
+Deux arènes en parallèle, un attaquant qui s'adapte à chaque round :
+- **défense gelée** : le modèle du round 0, jamais ré-entraîné ;
+- **défense adaptative** : ré-entraînée après chaque round sur les fraudes
+  qu'elle vient de voir.
+
+![Course à l'armement Phase 4](reports/phase4_arms_race.png)
+
+**Lecture :**
+- La défense **gelée fuit ~150k à chaque round, indéfiniment** : son butin cumulé
+  grimpe linéairement jusqu'à **2,29 M**.
+- La défense **adaptative étouffe l'attaquant** : la fuite par round tombe vers 0
+  et le butin cumulé plafonne à **0,63 M** — soit **72 % de butin en moins**.
+- Le pic au round 5 (panneau du bas) est authentique : l'attaquant perce une
+  fois, puis le ré-entraînement referme la brèche au round suivant. C'est la
+  course à l'armement en action.
+- **Dérive conceptuelle** : un modèle gelé ne se dégrade pas « tout seul » — c'est
+  l'attaquant qui le contourne. La parade n'est pas un meilleur modèle une fois
+  pour toutes, mais un **cycle de ré-entraînement**.
+
+> Choix d'implémentation : recherche évolutionnaire (pas de RL), comme recommandé
+> dans le plan — l'essentiel du signal pour ~1 jour de travail. Le seuil τ est
+> gelé pour les deux arènes, pour que la comparaison porte sur le **modèle**, pas
+> sur le seuil.
+
 ## Décisions de conception
 
 - **Les données synthétiques sont la colonne vertébrale**, Kaggle est un benchmark
@@ -159,8 +194,14 @@ src/
   explain.py           # raisons SHAP top-3 par alerte (TreeSHAP natif XGBoost)
   run_phase3.py        # point d'entrée Phase 3 -> seuil optimal + IC + SHAP
   make_chart_phase3.py # génère reports/phase3_cost_curve.png
+  # --- Phase 4 ---
+  attacker.py          # fraudeur évolutionnaire + features d'attaque causales
+  run_phase4.py        # course à l'armement : gelé vs ré-entraîné, N rounds
+  make_chart_phase4.py # génère reports/phase4_arms_race.png
   test_baseline.py     # schéma, ordre temporel, garantie anti-fuite (règles)
   test_features.py     # garantie anti-fuite (features)
+  test_costs.py        # comptabilité du modèle de coût
+  test_attacker.py     # features d'attaque + réponse de l'évolution à la défense
 notebooks/
 data/                  # artefacts générés (ignoré par git)
 reports/               # graphiques de résultats (un par phase)
@@ -174,8 +215,8 @@ pip install -r requirements.txt
 python src/run_baseline.py     # affiche la baseline Phase 1 (règles)
 python src/run_phase2.py       # entraîne les 3 modèles + tableau comparatif
 python src/run_phase3.py       # seuil optimisant le coût + IC bootstrap + SHAP
-python src/test_baseline.py    # tests Phase 1 (dont la garantie anti-fuite)
-python src/test_features.py    # test anti-fuite des features Phase 2
-python src/make_chart.py src/make_chart_phase2.py src/make_chart_phase3.py # graphiques
-# ou : make run   /   make phase2   /   make phase3
+python src/run_phase4.py       # course à l'armement (gelé vs ré-entraîné)
+make test                      # tous les tests (dont les garanties anti-fuite)
+make charts                    # régénère les 4 graphiques
+# ou : make run / make phase2 / make phase3 / make phase4
 ```
